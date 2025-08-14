@@ -1,0 +1,64 @@
+trigger:
+  branches:
+    include:
+      - master
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  remoteAppDir: "/home/azureuser/playground"
+
+stages:
+- stage: Deploy
+  displayName: "Deploy Node.js + Docker App"
+  jobs:
+  - job: CopyAndRun
+    displayName: "Copy files, build Docker image, restart Node.js app"
+    steps:
+    # 1) ディレクトリ作成
+    - task: SSH@0
+      displayName: "Create app directory"
+      inputs:
+        sshEndpoint: "my-vm-ssh"
+        runOptions: inline
+        script: |
+          set -eux
+          mkdir -p $(remoteAppDir)
+
+    # 2) ソースコピー
+    - task: CopyFilesOverSSH@0
+      displayName: "Upload source code"
+      inputs:
+        sshEndpoint: "my-vm-ssh"
+        sourceFolder: "$(Build.SourcesDirectory)"
+        contents: "**"
+        targetFolder: "$(remoteAppDir)"
+        cleanTargetFolder: true
+        overwrite: true
+
+    # 3) Dockerビルド + Node.js再起動
+    - task: SSH@0
+      displayName: "Build Docker image & restart server"
+      inputs:
+        sshEndpoint: "my-vm-ssh"
+        runOptions: inline
+        script: |
+          set -eux
+          cd $(remoteAppDir)
+
+          # Node依存関係インストール
+          npm install
+
+          # Dockerイメージをビルド
+          sudo docker build -t rust-runner .
+
+          # pm2 がなければインストール
+          if ! command -v pm2 >/dev/null 2>&1; then
+            sudo npm install -g pm2
+          fi
+
+          # アプリ再起動
+          pm2 delete server || true
+          pm2 start server.js --name server
+          pm2 save
